@@ -1,0 +1,239 @@
+**Midterm Project (First Draft)**
+=====================================================
+*Ryan Chan & Sangyoon Park / MATH 242*
+-----------------------------------------------------
+
+
+
+### Preparatory Work
+
+First, we load the data to R:
+```{r}
+flight <- read.csv("itineraries-2014.csv")
+```
+
+To better examine potential patterns, we reorder the data by market fare:
+```{r}
+flight <- flight[order(decreasing = TRUE, flight$MARKET_FARE),]
+```
+
+We examine some itineraries:
+```{r}
+flight[50:60,]
+flight[100:110,]
+flight[220:230,]
+flight[350:360,]
+```
+We do not notice a particular feature associatable to market fare. Yet, we notice that all itineraries we selected to examine engage NY as origin or destination. This observation leads us to wonder if this is the case for all itineraries in the dataset:
+```{r}
+nrow(flight[flight$ORIGIN_STATE_ABR == "NY" | flight$DEST_STATE_ABR == "NY",])
+```
+We indeed see that all itineraries in the dataset engage NY as origin or destination. And we also see that only two of these itineraries engage NY as both origin and destination:
+```{r}
+flight[flight$ORIGIN_STATE_ABR == "NY" & flight$DEST_STATE_ABR == "NY",]
+```
+
+Next, we examine the distribution of market fare:
+```{r}
+summary(flight$MARKET_FARE)
+boxplot(flight$MARKET_FARE)
+abline(h = 600, col = "red")
+hist(flight$MARKET_FARE)
+```
+
+We notice: 1) the distribution of market fare contains a bunch of potential outliers; and 2) it displays an extreme positive skew. The latter observation makes us doubt if the linear regression could serve as an appropriate modeling method. However, as our current knowledge/technique is confined to the linear regression method, we decide to try our best with it.
+
+
+
+### Data Exploration
+
+We now turn to examine the relationship between market fare and other potential predictor variables:
+```{r}
+plot(flight$MARKET_DISTANCE, flight$MARKET_FARE)
+plot(flight$QUARTER, flight$MARKET_FARE)
+plot(flight$ITIN_GEO_TYPE, flight$MARKET_FARE)
+plot(flight$numLayovers, flight$MARKET_FARE)
+plot(flight$PASSENGERS, flight$MARKET_FARE)
+```
+
+We find a very little---if any---linear relationship between *MARKET_DISTANCE* and *MARKET_FARE*. For other non-continuous variables (*QUARTER*, *ITIN_GEO_TYPE*, *numLayovers*, and *PASSENGERS*), we notice some group differences in their respective plots.
+
+We explore if exclusion of (potential) outliers changes these observations:
+```{r}
+flight_outlier <- flight[flight$MARKET_FARE > 600,]
+flight_normal <- flight[flight$MARKET_FARE <= 600,]
+hist(flight_normal$MARKET_FARE)   # still positively skewed
+plot(flight_normal$MARKET_DISTANCE, flight_normal$MARKET_FARE)
+plot(flight_normal$QUARTER, flight_normal$MARKET_FARE)
+plot(flight_normal$ITIN_GEO_TYPE, flight_normal$MARKET_FARE)
+plot(flight_normal$numLayovers, flight_normal$MARKET_FARE)
+plot(flight_normal$PASSENGERS, flight_normal$MARKET_FARE)
+```
+
+With the exclusion of (potential) outliers, we get scatter plots of finer resolution, which---to our dismay---even further reduces recognizable patterns (i.e. linear relationsihp and group differences).
+
+We now employ a more statistical approach to check whether each of the non-continuous variables in consideration can serve as a meaningful predictor for market fare. Specifically, we examine if different groups in each variable have noticeably different mean market fares. We first examine *QUARTER*:
+```{r}
+quarter_1 <- flight[flight$QUARTER == 1,]
+quarter_2 <- flight[flight$QUARTER == 2,]
+quarter_3 <- flight[flight$QUARTER == 3,]
+quarter_4 <- flight[flight$QUARTER == 4,]
+mean(quarter_1$MARKET_FARE)
+mean(quarter_2$MARKET_FARE)
+mean(quarter_3$MARKET_FARE)
+mean(quarter_4$MARKET_FARE)
+```
+We see that *QUARTER* displays some group differences in the mean market fare.
+
+Next, we examine *ITIN_GEO_TYPE*:
+```{r}
+contiguous_no <- flight[flight$ITIN_GEO_TYPE == 1,]
+contiguous_yes <- flight[flight$ITIN_GEO_TYPE == 2,]
+mean(contiguous_no$MARKET_FARE)
+mean(contiguous_yes$MARKET_FARE)
+```
+We see that *ITIN_GEO_TYPE* displays a noticeably large group difference in the mean market fare. But it need be noted that the non-contiguous group contains only 13 itineraries. Based on this observation, we conjecture a finer regional classification may serve as a potential predictor for market fare. Hence, we derive and append a new variable *REGION*:
+```{r}
+# creating categories for the new variable REGION
+Northeast <- c("ME", "NH", "VT", "MA", "CT", "RI", "NJ", "PA")   # NY is not included as it is already included in all itineraries in consideration
+Midwest <- c("ND", "SD", "NE", "KS", "MN", "IA", "MO", "WI", "IL", "IN", "MI", "OH")
+South <- c("MD", "DE", "DC", "VA", "WV", "KY", "NC", "TN", "SC", "GA", "FL", "AL", "MS", "AR", "LA", "OK", "TX")
+West <- c("WA", "OR", "CA", "ID", "MT", "WY", "NV", "UT", "CO", "AZ", "NM")
+Noncontiguous <- c("HI", "AL", "PR")
+
+# initializing the new variable REGION
+flight$REGION = 0
+
+# assigning classification values
+flight[flight$ORIGIN_STATE_ABR %in% Northeast | flight$DEST_STATE_ABR %in% Northeast,]$REGION = 1   # itineraries between NY and a Northeastern state
+flight[flight$ORIGIN_STATE_ABR %in% Midwest | flight$DEST_STATE_ABR %in% Midwest,]$REGION = 2   # itineraries between NY and a Midwestern state
+flight[flight$ORIGIN_STATE_ABR %in% South | flight$DEST_STATE_ABR %in% South,]$REGION = 3   # itineraries between NY and a Southern state
+flight[flight$ORIGIN_STATE_ABR %in% West | flight$DEST_STATE_ABR %in% West,]$REGION = 4   # itineraries between NY and a Western state
+flight[flight$ORIGIN_STATE_ABR %in% Noncontiguous | flight$DEST_STATE_ABR %in% Noncontiguous,]$REGION = 5   # itineraries between NY and a noncontiguous state
+
+# Itineraries within (i.e. to and from) NY should be assigned values separately as we excluded NY from the category "Northeast" for syntactic reasons.
+flight[flight$ORIGIN_STATE_ABR == "NY" & flight$DEST_STATE_ABR == "NY",]$REGION = 1
+```
+
+We now examine whether groups in *REGION* display differences in the mean market fare:
+```{r}
+region_northeast <- flight[flight$REGION == 1,]
+region_midwest <- flight[flight$REGION == 2,]
+region_south <- flight[flight$REGION == 3,]
+region_west <- flight[flight$REGION == 4,]
+region_noncont <- flight[flight$REGION == 5,]
+mean(region_northeast$MARKET_FARE)
+mean(region_midwest$MARKET_FARE)
+mean(region_south$MARKET_FARE)
+mean(region_west$MARKET_FARE)
+mean(region_noncont$MARKET_FARE)
+```
+We observe that *REGION* displays consierable group differences in the mean market fare, especially between *West + Noncontiguous* and *Northeast + Midwest + South* groups.
+
+Next, we examine *numLayovers*:
+```{r}
+layover_0 <- flight[flight$numLayovers == 0,]
+layover_1 <- flight[flight$numLayovers == 1,]
+layover_2 <- flight[flight$numLayovers == 2,]
+layover_3 <- flight[flight$numLayovers == 3,]
+mean(layover_0$MARKET_FARE)
+mean(layover_1$MARKET_FARE)
+mean(layover_2$MARKET_FARE)
+mean(layover_3$MARKET_FARE)
+```
+We see that *numLayovers* also displays consierable group differences in the mean market fare, but this observation warrants caution as the group sizes significantly differ. Specifically, *layover_2* contains only 17 itineraries and *layover_3* has just one itinerary. Thus, our main concern should be on the difference between groups *layover_0* and *layover_1*, which turns out to be quite small. For a better assessment of this case, we regroup itineraries into direct vs. indirect flight categories and compare their mean market fare:
+```{r}
+layover_no <- flight[flight$numLayovers == 0,]
+layover_yes <- flight[flight$numLayovers > 0,]
+mean(layover_no$MARKET_FARE)
+mean(layover_yes$MARKET_FARE)
+```
+As expected, we see the difference is quite small.
+
+Finally, we examine *PASSENGERS*. For the same reason of significant group size difference (e.g., there is only one itinerary with *PASSENGERS = 64*), we also apply a binary regrouping as the following:
+```{r}
+willingness_low <- flight[flight$PASSENGERS == 1,]
+willingness_high <- flight[flight$PASSENGERS > 1,]
+mean(willingness_low$MARKET_FARE)
+mean(willingness_high$MARKET_FARE)
+```
+We observe the two groups display a considerably difference in the mean market fare, which suggests the new binary classification may serve as a potential predictor variable for market fare. Accordingly, we derive and append a new variable *WILLINGNESS*:
+```{r}
+flight$WILLINGNESS = 1
+flight[flight$PASSENGERS > 1,]$WILLINGNESS = 2
+```
+
+We perform simple linear regression of airfare on each potential predictor variable:
+```{r, eval=FALSE}
+summary(lm(MARKET_FARE ~ MARKET_DISTANCE, data = flight))
+summary(lm(MARKET_FARE ~ as.factor(WILLINGNESS), data = flight))
+summary(lm(MARKET_FARE ~ as.factor(REGION), data = flight))
+summary(lm(MARKET_FARE ~ as.factor(QUARTER), data = flight))
+summary(lm(MARKET_FARE ~ as.factor(numLayovers), data = flight))
+```
+
+
+
+### Model Construction
+
+These exploratory observations and considerations then lead us to come up with and test several tentative models. First, we test a SLR model with *MARKET_DISTANCE* as the predictor variable:
+```{r}
+fit_1 <- lm(MARKET_FARE ~ MARKET_DISTANCE, data = flight)
+summary(fit_1)
+```
+The obtained p-value is statistically significant, so we reject the null hypothesis that *MARKET_DISTANCE* has no effect on *MARKET_FARE*. In other words, we include *MARKET_DISTANCE* in our model.
+
+We now add *WILLINGNESS* as another predictor variable and test the resulting model:
+```{r}
+fit_2 <- lm(MARKET_FARE ~ MARKET_DISTANCE + as.factor(WILLINGNESS), data = flight)
+anova(fit_1, fit_2)
+```
+The obtained p-value is statistically significant, so we reject the null hypothesis that the coefficient for *WILLINGNESS* is equal to zero. In other words, we include *WILLINGNESS* in our model.
+
+Next, we add *REGION* as another predictor variable and test the resulting model:
+```{r}
+fit_3 <- lm(MARKET_FARE ~ MARKET_DISTANCE + as.factor(WILLINGNESS) + as.factor(REGION), data = flight)
+anova(fit_2, fit_3)
+```
+The obtained p-value is statistically significant, so we reject the null hypothesis that the coefficients for *REGION* are all equal to zero. In other words, we include *REGION* in our model.
+
+Finally, we try adding each of *QUARTER* and *numLayovers* as another predictor variable and test the resulting model(s):
+```{r}
+fit_4 <- lm(MARKET_FARE ~ MARKET_DISTANCE + as.factor(WILLINGNESS) + as.factor(REGION) + as.factor(QUARTER), data = flight)
+fit_5 <- lm(MARKET_FARE ~ MARKET_DISTANCE + as.factor(WILLINGNESS) + as.factor(REGION) + as.factor(numLayovers), data = flight)
+anova(fit_3, fit_4)
+anova(fit_3, fit_5)
+```
+As expected, p-value is statistically non-significant for both cases, so we fail to reject the null hypotheses that: 1) the coefficients for *QUARTER* are all equal to zero; and 2) the coefficients for *numLayovers* are all equal to zero. In other words, we exclude *QUARTER* and *numLayovers* from our model.
+
+Therefore, we choose *fit_3* as our model.
+```{r}
+summary(fit_3)
+```
+
+
+
+### Model Evaluation
+
+We diagnose the model by examining the residual plot:
+```{r}
+plot(fitted(fit_3), resid(fit_3))
+abline(h=0, col="red")
+```
+
+And we check the potential multicollinearity in the model:
+```{r}
+library(car)
+vif(fit_3)
+```
+
+
+
+
+
+```{r, echo=FALSE, eval=FALSE}
+### codes for plots to be used in the paper
+hist(flight_normal$MARKET_FARE, main = "Distribution of Market Fare (<= $600)", xlab = "Market Fare")
+plot(flight_normal$MARKET_DISTANCE, flight_normal$MARKET_FARE, main = "Market Distance vs. Market Fare (<= $600)", xlab = "Market Distance", ylab = "Market Fare")
+```
+
